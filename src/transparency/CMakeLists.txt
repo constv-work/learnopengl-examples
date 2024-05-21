@@ -1,0 +1,6 @@
+fips_begin_app(transparency windowed)
+    fips_vs_warning_level(3)
+    fips_files(transparency.c)
+    sokol_shader(transparency.glsl ${slang})
+    fips_deps(sokol)
+fips_end_app()
