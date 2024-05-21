@@ -232,6 +232,116 @@ void handle_input_fp(struct fp_cam* camera, const sapp_event* e, hmm_vec2 mouse_
 void update_fp_camera(struct fp_cam* camera, float delta_time);
 const char* help_fp();
 
+typedef struct {
+    hmm_vec3 camera_pos;
+    hmm_vec3 camera_front;
+    hmm_vec3 camera_up;
+    uint64_t last_time;
+    uint64_t delta_time;
+    bool first_mouse;
+    float last_x;
+    float last_y;
+    float yaw;
+    float pitch;
+    float fov;
+} lopgl_camera_state;
+
+typedef enum lopgl_camera_buttons
+{
+    LOPGL_RIGHT,
+    LOPGL_LEFT,
+    LOPGL_UP,
+    LOPGL_DOWN
+} lopgl_camera_buttons;
+
+void lopgl_camera_mouse_move(lopgl_camera_state* camera, const float mouse_x, const float mouse_y) {
+    if (camera->first_mouse) {
+        camera->last_x = mouse_x;
+        camera->last_y = mouse_y;
+        camera->first_mouse = false;
+    }
+
+    float xoffset = mouse_x - camera->last_x;
+    float yoffset = camera->last_y - mouse_y;
+    camera->last_x = mouse_x;
+    camera->last_y = mouse_y;
+
+    float sensitivity = 0.5f;
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    camera->yaw += xoffset;
+    camera->pitch += yoffset;
+
+    if (camera->pitch > 89.0f) {
+        camera->pitch = 89.0f;
+    }
+    else if (camera->pitch < -89.0f) {
+        camera->pitch = -89.0f;
+    }
+
+    hmm_vec3 direction;
+    direction.X = cosf(HMM_ToRadians(camera->yaw)) * cosf(HMM_ToRadians(camera->pitch));
+    direction.Y = sinf(HMM_ToRadians(camera->pitch));
+    direction.Z = sinf(HMM_ToRadians(camera->yaw)) * cosf(HMM_ToRadians(camera->pitch));
+    camera->camera_front = HMM_NormalizeVec3(direction);
+}
+
+void lopgl_camera_scroll(lopgl_camera_state* camera, const float scroll_y)
+{
+    if (camera->fov >= 1.0f && camera->fov <= 45.0f) {
+        camera->fov -= scroll_y;
+    }
+    if (camera->fov <= 1.0f)
+        camera->fov = 1.0f;
+    else if (camera->fov >= 45.0f)
+        camera->fov = 45.0f;
+}
+
+void lopgl_camera_button(lopgl_camera_state* camera, const float time, const lopgl_camera_buttons direction)
+{
+    float camera_speed = 5.f * time;
+    if (direction == LOPGL_UP) {
+        hmm_vec3 offset = HMM_MultiplyVec3f(camera->camera_front, camera_speed);
+        camera->camera_pos = HMM_AddVec3(camera->camera_pos, offset);
+    }
+    if (direction == LOPGL_DOWN) {
+        hmm_vec3 offset = HMM_MultiplyVec3f(camera->camera_front, camera_speed);
+        camera->camera_pos = HMM_SubtractVec3(camera->camera_pos, offset);
+    }
+    if (direction == LOPGL_LEFT) {
+        hmm_vec3 offset = HMM_MultiplyVec3f(HMM_NormalizeVec3(HMM_Cross(camera->camera_front, camera->camera_up)), camera_speed);
+        camera->camera_pos = HMM_SubtractVec3(camera->camera_pos, offset);
+    }
+    if (direction == LOPGL_RIGHT) {
+        hmm_vec3 offset = HMM_MultiplyVec3f(HMM_NormalizeVec3(HMM_Cross(camera->camera_front, camera->camera_up)), camera_speed);
+        camera->camera_pos = HMM_AddVec3(camera->camera_pos, offset);
+    }
+}
+
+lopgl_camera_buttons sg_to_lopgl_button(const sapp_keycode keyCode) {
+    if (keyCode == SAPP_KEYCODE_W)
+        return LOPGL_UP;
+    if (keyCode == SAPP_KEYCODE_S)
+        return LOPGL_DOWN;
+    if (keyCode == SAPP_KEYCODE_A)
+        return LOPGL_LEFT;
+    if (keyCode == SAPP_KEYCODE_D)
+        return LOPGL_RIGHT;
+
+    return LOPGL_RIGHT;
+}
+
+hmm_mat4 lopgl_camera_view(const lopgl_camera_state* const cameraState)
+{
+    return HMM_LookAt(cameraState->camera_pos, HMM_AddVec3(cameraState->camera_pos, cameraState->camera_front), cameraState->camera_up);
+}
+
+hmm_mat4 lopgl_camera_perspective(const lopgl_camera_state* const cameraState, const float aspectRation)
+{
+    return HMM_Perspective(cameraState->fov, aspectRation, 0.1f, 100.0f);
+}
+
 /*=== APP ==========================================================*/
 
 typedef struct _cubemap_request_t {

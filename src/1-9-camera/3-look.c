@@ -18,17 +18,7 @@ static struct {
     sg_pass_action pass_action;
     uint8_t file_buffer[256 * 1024];
     hmm_vec3 cube_positions[10];
-    hmm_vec3 camera_pos;
-    hmm_vec3 camera_front;
-    hmm_vec3 camera_up;
-    uint64_t last_time;
-    uint64_t delta_time;
-    bool first_mouse;
-    float last_x;
-    float last_y;
-    float yaw;
-    float pitch;
-    float fov;
+    lopgl_camera_state camera_state;
 } state;
 
 static void fetch_callback(const sfetch_response_t*);
@@ -65,12 +55,14 @@ static void init(void) {
     sapp_show_mouse(false);
 
     // set default camera configuration
-    state.camera_pos = HMM_Vec3(0.0f, 0.0f,  3.0f);
-    state.camera_front = HMM_Vec3(0.0f, 0.0f, -1.0f);
-    state.camera_up = HMM_Vec3(0.0f, 1.0f,  0.0f);
-    state.first_mouse = true;
-    state.fov = 45.0f;
-    state.yaw = -90.0f;
+    lopgl_camera_state camera_default = { .camera_pos = HMM_Vec3(0.0f, 0.0f,  3.0f),
+        .camera_front = HMM_Vec3(0.0f, 0.0f, -1.0f),
+        .camera_up = HMM_Vec3(0.0f, 1.0f,  0.0f),
+        .first_mouse = true,
+        .fov = 45.0f,
+        .yaw = -90.0f
+    };
+    state.camera_state = camera_default;
 
     state.cube_positions[0] = HMM_Vec3( 0.0f,  0.0f,  0.0f);
     state.cube_positions[1] = HMM_Vec3( 2.0f,  5.0f, -15.0f);
@@ -226,11 +218,11 @@ static void fetch_callback(const sfetch_response_t* response) {
 }
 
 void frame(void) {
-    state.delta_time = stm_laptime(&state.last_time);
+    state.camera_state.delta_time = stm_laptime(&state.camera_state.last_time);
     sfetch_dowork();
 
-    hmm_mat4 view = HMM_LookAt(state.camera_pos, HMM_AddVec3(state.camera_pos, state.camera_front), state.camera_up);
-    hmm_mat4 projection = HMM_Perspective(state.fov, (float)sapp_width() / (float)sapp_height(), 0.1f, 100.0f);
+    hmm_mat4 view = lopgl_camera_view(&state.camera_state);
+    hmm_mat4 projection = lopgl_camera_perspective(&state.camera_state, (float)sapp_width() / (float)sapp_height());
 
     sg_begin_default_pass(&state.pass_action, sapp_width(), sapp_height());
     sg_apply_pipeline(state.pip);
@@ -266,65 +258,15 @@ void event(const sapp_event* e) {
             sapp_show_mouse(!mouse_shown);
         }
 
-        float camera_speed = 5.f * (float) stm_sec(state.delta_time);
-
-        if (e->key_code == SAPP_KEYCODE_W) {
-            hmm_vec3 offset = HMM_MultiplyVec3f(state.camera_front, camera_speed);
-            state.camera_pos = HMM_AddVec3(state.camera_pos, offset);
-        }
-        if (e->key_code == SAPP_KEYCODE_S) {
-            hmm_vec3 offset = HMM_MultiplyVec3f(state.camera_front, camera_speed);
-            state.camera_pos = HMM_SubtractVec3(state.camera_pos, offset);
-        }
-        if (e->key_code == SAPP_KEYCODE_A) {
-            hmm_vec3 offset = HMM_MultiplyVec3f(HMM_NormalizeVec3(HMM_Cross(state.camera_front, state.camera_up)), camera_speed);
-            state.camera_pos = HMM_SubtractVec3(state.camera_pos, offset);
-        }
-        if (e->key_code == SAPP_KEYCODE_D) {
-            hmm_vec3 offset = HMM_MultiplyVec3f(HMM_NormalizeVec3(HMM_Cross(state.camera_front, state.camera_up)), camera_speed);
-            state.camera_pos = HMM_AddVec3(state.camera_pos, offset);
-        }
+        const float time = (float) stm_sec(state.camera_state.delta_time);
+        const lopgl_camera_buttons button = sg_to_lopgl_button(e->key_code);
+        lopgl_camera_button(&state.camera_state, time, button);
     }
     else if (e->type == SAPP_EVENTTYPE_MOUSE_MOVE) {
-        if(state.first_mouse) {
-            state.last_x = e->mouse_x;
-            state.last_y = e->mouse_y;
-            state.first_mouse = false;
-        }
-    
-        float xoffset = e->mouse_x - state.last_x;
-        float yoffset = state.last_y - e->mouse_y; 
-        state.last_x = e->mouse_x;
-        state.last_y = e->mouse_y;
-
-        float sensitivity = 0.5f;
-        xoffset *= sensitivity;
-        yoffset *= sensitivity;
-
-        state.yaw   += xoffset;
-        state.pitch += yoffset;
-
-        if(state.pitch > 89.0f) {
-            state.pitch = 89.0f;
-        }
-        else if(state.pitch < -89.0f) {
-            state.pitch = -89.0f;
-        }
-
-        hmm_vec3 direction;
-        direction.X = cosf(HMM_ToRadians(state.yaw)) * cosf(HMM_ToRadians(state.pitch));
-        direction.Y = sinf(HMM_ToRadians(state.pitch));
-        direction.Z = sinf(HMM_ToRadians(state.yaw)) * cosf(HMM_ToRadians(state.pitch));
-        state.camera_front = HMM_NormalizeVec3(direction);
+        lopgl_camera_mouse_move(&state.camera_state, e->mouse_x, e->mouse_y);
     }
     else if (e->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
-        if (state.fov >= 1.0f && state.fov <= 45.0f) {
-            state.fov -= e->scroll_y;
-        }
-        if (state.fov <= 1.0f)
-            state.fov = 1.0f;
-        else if (state.fov >= 45.0f)
-            state.fov = 45.0f;
+        lopgl_camera_scroll(&state.camera_state, e->scroll_y);
     }
 }
 
